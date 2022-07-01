@@ -3,11 +3,12 @@
 /** Reservation for Lunchly */
 
 const moment = require("moment");
+const { NotFoundError, BadRequestError } = require("../expressError");
 
 const db = require("../db");
 
-/** A reservation for a party */
 
+/** A reservation for a party */
 class Reservation {
   constructor({ id, customerId, numGuests, startAt, notes }) {
     this.id = id;
@@ -17,27 +18,67 @@ class Reservation {
     this.notes = notes;
   }
 
-  /** formatter for startAt */
 
+  /** formatter for startAt */
   getFormattedStartAt() {
     return moment(this.startAt).format("MMMM Do YYYY, h:mm a");
   }
 
-  /** given a customer id, find their reservations. */
 
+  /** given a customer id, find their reservations. */
   static async getReservationsForCustomer(customerId) {
     const results = await db.query(
-          `SELECT id,
+      `SELECT id,
                   customer_id AS "customerId",
                   num_guests AS "numGuests",
                   start_at AS "startAt",
                   notes AS "notes"
            FROM reservations
            WHERE customer_id = $1`,
-        [customerId],
+      [customerId],
     );
 
     return results.rows.map(row => new Reservation(row));
+  }
+
+
+  /** save this reservation. */
+  async save() {
+    if (this.id === undefined) {
+      const result = await db.query(
+        `INSERT INTO reservations (customer_id, start_at, num_guests, notes)
+             VALUES ($1, $2, $3, $4)
+             RETURNING id`,
+        [this.customerId, this.startAt, this.numGuests, this.notes],
+      );
+
+      this.id = result.rows[0].id;
+
+      if (this.id === undefined) {
+        const err = new Error(`Could not make reservation.`);
+        err.status = 404;
+        throw err;
+      }
+
+    } else {
+      const result = await db.query(
+        `UPDATE reservations
+             SET start_at=$1,
+                 num_guests=$2,
+                 notes=$3
+             WHERE id = $4
+             RETURNING id`, [
+        this.startAt,
+        this.numGuests,
+        this.notes,
+        this.id,
+      ],
+      );
+
+      if (result.rows.length === 0) {
+        throw new NotFoundError(`Could not find reservation with id: ${this.id}.`);
+      }
+    }
   }
 }
 
